@@ -21,7 +21,7 @@ const ELO_FACTOR = 32; // what they use in chess apparently
 app.use(bodyParser.urlencoded({ extended: false }));
 // parse application/json
 app.use(bodyParser.json());
-//app.use(cors)
+app.use(cors)
 const asyncMiddleware = fn =>
   (req, res, next) => {
     Promise.resolve(fn(req, res, next))
@@ -52,7 +52,7 @@ app.post('/api/match/', async (req, res) => {
       const challenge = createChallenge(otherPlayer, currUser);  //note, otherPlayer challenged us so is first parameter
       res.send(challenge);
 
-    } /*else{
+    } else{
       await waitingRoom.doc(currUser.id).set({
         id: currUser.id,
         created: admin.firestore.Timestamp.now(),
@@ -61,7 +61,7 @@ app.post('/api/match/', async (req, res) => {
       })
       res.send({challenge: {}})
     }
-    return;*/ //Allow for changes in status while in waiting room to start a challenge
+    return; // FUCK need to delete from waiting room after game
   }
 
   // If first visit i.e not already in waiting room, then scan for other players
@@ -170,6 +170,14 @@ app.post('/api/play', async (req,res) => {
 
 });
 
+app.post('/api/play/moves', async (req, res) => {
+
+  const challenge = req.body.challenge;
+  const gameRoom = (await db.docs(challenge.room).get()).data();
+  res.send({moves: gameRoom.moves})
+})
+
+
 //Requires: challenge, uid, won--binary corresponding to if client won
 app.post('/api/endGame', async (req, res) => {
 
@@ -199,18 +207,29 @@ app.post('/api/endGame', async (req, res) => {
 
   const won = req.body.won; //0 or 1 or 1/2
 
-  const newElo = calculateEloChange(player.elo, otherPlayer.elo, won);
 
   player.totalGames += 1;
   player.gamesWon += won;
   player.gameHistory.push(room); // phat push
-  player.elo = newElo;
 
-  db.doc(`users/${playerId}`).set(player).catch( (err) => console.log('Error updating user after game: ', err))
   if(otherPlayerWaiting.opponent !== playerId) {
     // Other player has already called this endpoint, time to shut the gameroom off
+    // adjust both elos together
+    const elos = calculateEloChange(player.elo, otherPlayer.elo, won);
+    player.elo = elos['first'];
+    otherPlayer.elo = elos['second']
+    
+    // Update opponents ELO
+    db.doc(`users/${otherPlayerId}`).update({elo: otherPlayer.elo}).catch((err) => console.log('Error in updating elos'));
+
+
     db.doc(challenge.room).delete().catch((err) =>console.log('Error in Deleting the Game Room:', err))
   }
+
+  // Set new stat changes
+  db.doc(`users/${playerId}`).set(player).catch( (err) => console.log('Error updating user after game: ', err))
+
+
   // Now change waiting room status
   db.collection(WAITING).doc(playerId).update({opponent: OFFLINE_STATUS})
     .catch((err) => console.log('Error in updating waiting status after end game:', err))
@@ -218,7 +237,10 @@ app.post('/api/endGame', async (req, res) => {
 });
 
 
+// Requires: uid, username/displayName and friend userName/displayName
+//Sends push notifications, assumes registrationToken is under users/uid
 app.post('/api/challengeFriend', async (req, res) => {
+
 
   const playerId = req.body.uid;
   const friendUsername = req.body.friend;
@@ -226,9 +248,12 @@ app.post('/api/challengeFriend', async (req, res) => {
   const querySnapshot = await db.doc('users').where('display', '==', friendUsername).get()
   if (querySnapshot.docs.length === 1) {
     const friend = querySnapshot.docs[0].data();
+    const token = friend.registrationToken;
+
+
 
   } else {
-    res.status(400).send({error: 'Username does not exist'})
+    res.status(400).send({error: 'Username does not exist or is ambiguous?'})
   }
 
 });
@@ -240,8 +265,10 @@ function calculateEloChange(first, second , won) {
   const r1 = Math.pow(10, (first)/400)
   const r2 = Math.pow(10, (second)/ 400)
   const e1 = r1/(r1+r2)
-  const newElo = r1 + ELO_FACTOR * (won - e1)
-  return newElo
+  const e2 = r2/(r1+r2)
+  const newElo1 = r1 + ELO_FACTOR * (won - e1)
+  const newElo2 = r2 + ELO_FACTOR * ( (1-won) - e2)
+  return {first: newElo, second: newElo2}
 
 }
 
@@ -259,9 +286,6 @@ function createChallenge(challenger, waiter) {
 function getUserDoc(UID) {
   return db.doc(`users/${UID}`).get()
 }
-
-
-
 
 
 // Expose Express Routes
