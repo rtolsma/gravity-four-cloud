@@ -4,6 +4,7 @@ This repository contains the code related to the Firebase Cloud functions used f
 
 ## Endpoints
 
+## Base URL: https://us-central1-treehacks-2019.cloudfunctions.net/app/
 
 ## Notes: `challenge`
 
