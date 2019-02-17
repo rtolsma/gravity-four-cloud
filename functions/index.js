@@ -3,7 +3,7 @@ const admin = require('firebase-admin')
 const functions = require('firebase-functions')
 const express = require('express')
 const bodyParser = require('body-parser')
-//const cors = require('cors')({origin: false});
+const cors = require('cors')({origin: false});
 
 admin.initializeApp(functions.config().firebase);
 
@@ -47,16 +47,23 @@ app.post('/api/match/', async (req, res) => {
   if (me.docs.length === 1) {
     const matchedOpponent = me.docs[0].data().opponent;
     console.log("MATCHED OPPONENT:", matchedOpponent)
-    if (![WAITING_STATUS, OFFLINE_STATUS].includes(matchedOpponent)) {
-      const otherPlayer = await getUserDoc(matchedOpponent);
-      const challenge = createChallenge(otherPlayer, currUser);  //note, otherPlayer challenged us so is first parameter
-      res.send(challenge);
+    if (matchedOpponent !== WAITING_STATUS) {
+      const otherPlayer = (await getUserDoc(matchedOpponent)).data();
+      //note, be passive, get challenge info from room...
+      const roomPath = `rooms/${otherPlayer.id}${userId}`
+      const room = (await db.doc(roomPath).get()).data();
+
+      const challenge = {
+        room: roomPath,
+        playerOne: room.playerOne,
+        playerTwo: room.playerTwo,
+      }
+      res.send({challenge: challenge});
 
     } else{
-      await waitingRoom.doc(currUser.id).set({
+      await waitingRoom.doc(currUser.id).update({
         id: currUser.id,
         created: admin.firestore.Timestamp.now(),
-        elo: currUser.elo,
         opponent: WAITING_STATUS
       })
       res.send({challenge: {}})
@@ -91,7 +98,7 @@ app.post('/api/match/', async (req, res) => {
       // UPDATE OPPONENT STATUS FOR OTHER PLAYER
       await waitingRoom.doc(otherPlayer.id).update({opponent: currUser.id});
       initiateGame(challenge);
-      res.send({challenge});
+      res.send({challenge: challenge});
 
     } else {
 
@@ -145,6 +152,7 @@ app.post('/api/play', async (req,res) => {
   const gameRoom = (await db.doc(challenge.room).get()).data();
   const playerParity = (playerId == playerOne) ? 0 : 1;
 
+  console.log(`${playerId} trying to play move ${move} in room ${gameRoom}`)
   // It's our turn
   if (playerParity == gameRoom.moves.length % 2) {
     
@@ -173,7 +181,8 @@ app.post('/api/play', async (req,res) => {
 app.post('/api/play/moves', async (req, res) => {
 
   const challenge = req.body.challenge;
-  const gameRoom = (await db.docs(challenge.room).get()).data();
+  const gameRoom = (await db.doc(challenge.room).get()).data();
+  console.log('Sending Moves: ', gameRoom.moves)
   res.send({moves: gameRoom.moves})
 })
 
@@ -181,58 +190,59 @@ app.post('/api/play/moves', async (req, res) => {
 //Requires: challenge, uid, won--binary corresponding to if client won
 app.post('/api/endGame', async (req, res) => {
 
-  // 1) Change waiting room stats to offline
+  // 1) Delete waiting room positions to offline
   // 2) Update users/UID docs with new Elo+wins+gameHistory+totalGames
   // 3) Delete gameRoom --
   // to make sure loser doesn't call also (will only delete on user with last unchanged waiting status)
   res.send({success: "success"});
 
 
-  const challenge = req.body.challenge;
-  const playerId = req.body.uid;
-  
-  const room = (await db.doc(challenge.room).get()).data();
-
-  const playerWaiting = (await db.collection(WAITING).doc(playerId).get()).data();
-  const otherPlayerId = playerWaiting.opponent;
-
-  //STATUS ALREADY CHANGED SO DON'T DO ANYTHING NEW
-  if([WAITING_STATUS, OFFLINE_STATUS].includes(otherPlayerId)) {
-    return;
-  }
-  
-  const player = (await getUserDoc(playerId)).data();
-  const otherPlayerWaiting = (await db.collection(WAITING).doc(otherPlayerId).get()).data();
-  const otherPlayer = (await getUserDoc(playerId)).data()
-
+  // UPDATE GAME STATS (runs for winner and loser)
   const won = req.body.won; //0 or 1 or 1/2
+  const playerId = req.body.uid;
+  const player = (await getUserDoc(playerId)).data();
+  const challenge = req.body.challenge;
 
-
+  const room = (await db.doc(challenge.room).get()).data();
   player.totalGames += 1;
   player.gamesWon += won;
   player.gameHistory.push(room); // phat push
+  db.doc(`users/${playerId}`).set(player).catch((err) => console.log("Error updating player game stats"))
 
-  if(otherPlayerWaiting.opponent !== playerId) {
-    // Other player has already called this endpoint, time to shut the gameroom off
-    // adjust both elos together
-    const elos = calculateEloChange(player.elo, otherPlayer.elo, won);
-    player.elo = elos['first'];
-    otherPlayer.elo = elos['second']
-    
-    // Update opponents ELO
-    db.doc(`users/${otherPlayerId}`).update({elo: otherPlayer.elo}).catch((err) => console.log('Error in updating elos'));
-
-
-    db.doc(challenge.room).delete().catch((err) =>console.log('Error in Deleting the Game Room:', err))
+  if (!won) {
+    // Loser doesn't do shit
+    return;
   }
 
-  // Set new stat changes
-  db.doc(`users/${playerId}`).set(player).catch( (err) => console.log('Error updating user after game: ', err))
+  console.log("Cleaning game up from: ", challenge.room)
+  // Just Winner now
 
+  const playerWaiting = (await db.collection(WAITING).doc(playerId).get()).data();
+  const otherPlayerId = playerWaiting.opponent;
+  const otherPlayerWaiting = (await db.collection(WAITING).doc(otherPlayerId).get()).data();
+  const otherPlayer = (await getUserDoc(playerId)).data()
+ 
+  //ARBITRARY DECISION: WINNER DELETES THE SHIT
+  // Other player has already called this endpoint, time to shut the gameroom off
+  // and kill both their waiting room docs
+  // adjust both elos together
+  const elos = calculateEloChange(player.elo, otherPlayer.elo, won);
+  player.elo = elos['first'];
+  otherPlayer.elo = elos['second']
+  
+  // Update both ELOs
+  db.doc(`users/${otherPlayerId}`).update({elo: otherPlayer.elo}).catch((err) => console.log('Error in updating elos'));
+  db.doc(`users/${playerId}`).update({elo: player.elo}).catch((err) => console.log('Error in updating elos'));
 
-  // Now change waiting room status
-  db.collection(WAITING).doc(playerId).update({opponent: OFFLINE_STATUS})
-    .catch((err) => console.log('Error in updating waiting status after end game:', err))
+  //Delete Game Room
+  db.doc(challenge.room).delete().catch((err) =>console.log('Error in Deleting the Game Room:', err))
+
+  // Now delete waiting room docs for both players
+  db.collection(WAITING).doc(playerId).delete()
+  .catch((err) => console.log('Error in deleting waiting room doc after end game:', err))
+  
+  db.collection(WAITING).doc(otherPlayerId).delete()
+  .catch((err) => console.log('Error in deleting waiting room doc after end game:', err))
 
 });
 
@@ -250,8 +260,6 @@ app.post('/api/challengeFriend', async (req, res) => {
     const friend = querySnapshot.docs[0].data();
     const token = friend.registrationToken;
 
-
-
   } else {
     res.status(400).send({error: 'Username does not exist or is ambiguous?'})
   }
@@ -268,12 +276,12 @@ function calculateEloChange(first, second , won) {
   const e2 = r2/(r1+r2)
   const newElo1 = r1 + ELO_FACTOR * (won - e1)
   const newElo2 = r2 + ELO_FACTOR * ( (1-won) - e2)
-  return {first: newElo, second: newElo2}
-
+  return {first: newElo1, second: newElo2}
 }
 
 function createChallenge(challenger, waiter) {
   const firstMove = Math.random() > 0.5 ? challenger.id : waiter.id;
+  // Flip a coin for who goes first vs. second
   const secondMove = firstMove === challenger.id? waiter.id : challenger.id;
     const challenge = {
       room: `rooms/${challenger.id}${waiter.id}`,
