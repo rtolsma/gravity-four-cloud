@@ -52,7 +52,7 @@ app.post('/api/match/', async (req, res) => {
       //note, be passive, get challenge info from room...
       const roomPath = `rooms/${otherPlayer.id}${userId}`
       const room = (await db.doc(roomPath).get()).data();
-
+      console.log('Returning challenge of room:', room)
       const challenge = {
         room: roomPath,
         playerOne: room.playerOne,
@@ -68,6 +68,7 @@ app.post('/api/match/', async (req, res) => {
       })
       res.send({challenge: {}})
     }
+    
     return; // FUCK need to delete from waiting room after game
   }
 
@@ -247,24 +248,32 @@ app.post('/api/endGame', async (req, res) => {
 });
 
 
-// Requires: uid, username/displayName and friend userName/displayName
-//Sends push notifications, assumes registrationToken is under users/uid
-app.post('/api/challengeFriend', async (req, res) => {
-
+// Requires: uid
+app.post('/api/match/exit', async (req, res) => {
 
   const playerId = req.body.uid;
-  const friendUsername = req.body.friend;
+  db.collection(WAITING).doc(playerId).delete()
+    .catch((err) =>console.log(`Error in deleting ${playerId} from Queue, likely non-existent doc`,err))
+  res.send({success: "success"})
+})
 
-  const querySnapshot = await db.doc('users').where('display', '==', friendUsername).get()
-  if (querySnapshot.docs.length === 1) {
-    const friend = querySnapshot.docs[0].data();
-    const token = friend.registrationToken;
+app.post('/api/play/killgame', async (req, res) => {
 
-  } else {
-    res.status(400).send({error: 'Username does not exist or is ambiguous?'})
-  }
+  const challenge = req.challenge;
+  const playerOneId = req.challenge.playerOne;
+  const playerTwoId =  req.challenge.playerTwo;
 
-});
+  console.log(`Kill Game called for room ${challenge.room}`)
+
+  db.collection(WAITING).doc(playerOneId).delete()
+    .catch((err) =>console.log(`Error in deleting ${playerOneId} from Queue, likely non-existent doc`,err))
+  db.collection(WAITING).doc(playerTwoId).delete()
+    .catch((err) =>console.log(`Error in deleting ${playerTwoId} from Queue, likely non-existent doc`,err))
+
+  db.doc(challenge.room).delete().catch((err) => console.log("error in deleting room"))
+
+})
+
 
 
 //########### UTILITY FUNCTIONS #####################

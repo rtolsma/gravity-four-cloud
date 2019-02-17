@@ -23,7 +23,7 @@ The `challenge` token contains information necessary for the server to maintain 
 
 ### POST `/api/match`
 
-Expects: `{uid: int}` in the JSON body. Will respond with a `challenge` token that contains important bookkeeping information for the server if the user is placed out of the Queue. If not immediately matched, `challenge` will be an empty object, and the user will be placed into the queue. Repeated requests will reflect any changes in the matching process. Throughout the game, a call to `/api/match` will return the relevant `challenge` token.
+Expects: `{uid: str}` in the JSON body. Will respond with a `challenge` token that contains important bookkeeping information for the server if the user is placed out of the Queue. If not immediately matched, `challenge` will be an empty object, and the user will be placed into the queue. Repeated requests will reflect any changes in the matching process. Throughout the game, a call to `/api/match` will return the relevant `challenge` token.
 
 
 ### POST `/api/play`
