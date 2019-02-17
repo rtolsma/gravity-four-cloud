@@ -13,7 +13,7 @@ const db = admin.firestore();
 const WAITING = 'waitingRoom' //'rooms/waiting'
 const WAITING_STATUS = -1;
 const OFFLINE_STATUS = -3;
-const ELO_DIFF = 300;
+const ELO_DIFF = 1000;
 const ELO_FACTOR = 32; // what they use in chess apparently
 
 
@@ -226,10 +226,10 @@ app.post('/api/endGame', async (req, res) => {
   // Other player has already called this endpoint, time to shut the gameroom off
   // and kill both their waiting room docs
   // adjust both elos together
-  const elos = calculateEloChange(player.elo, otherPlayer.elo, won);
+  /*const elos = calculateEloChange(player.elo, otherPlayer.elo, won);
   player.elo = elos['first'];
   otherPlayer.elo = elos['second']
-  
+  */
   // Update both ELOs
   db.doc(`users/${otherPlayerId}`).update({elo: otherPlayer.elo}).catch((err) => console.log('Error in updating elos'));
   db.doc(`users/${playerId}`).update({elo: player.elo}).catch((err) => console.log('Error in updating elos'));
