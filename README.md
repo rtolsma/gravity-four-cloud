@@ -51,3 +51,6 @@ Expects: `{challenge: token}`. Often while playing the game, it can be inconveni
 ### POST `/api/endGame`
 
 Expects: `{uid: str, won: float, challenge: token}`, always returns `{success: "success"}`. Client side validation of the game logic will determine whether a given player wins or not. It is the client side responsibility to send a POST request to this endpoint to notify the server of the results, to update player statistics, and close unnecessary connections. Following this call, both clients will be removed from the queue and subsequent calls to `/api/match` will no longer retain the generated `challenge` token.
+
+
+### POST `/api/play/killgame`

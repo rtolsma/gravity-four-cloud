@@ -271,6 +271,7 @@ app.post('/api/play/killgame', async (req, res) => {
     .catch((err) =>console.log(`Error in deleting ${playerTwoId} from Queue, likely non-existent doc`,err))
 
   db.doc(challenge.room).delete().catch((err) => console.log("error in deleting room"))
+  res.send({success: "success"});
 
 })
 
