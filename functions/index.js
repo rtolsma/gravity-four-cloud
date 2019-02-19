@@ -33,6 +33,19 @@ app.post('/api/helloworld/', (req, res) => {
   res.send({'hello world': JSON.stringify(req.body.message), "test":"test"})
 })
 
+//Call before matching, expects a uid
+
+app.post('/api/startMatch', async (req,res) => {
+
+  const playerId = req.body.uid;
+
+  await db.collection(WAITING).doc(playerId).delete()
+  .catch((err) => console.log('Error in deleting waiting room doc after end game:', err))
+
+  res.send({success: "success"})
+
+})
+
 // Query with user object, returns challenge object blank if no match yet
 app.post('/api/match/', async (req, res) => {
   const body = req.body;
